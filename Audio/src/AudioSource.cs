@@ -30,7 +30,7 @@ public class AudioSource : IAudioSource {
   }
 
   public bool HasFrame(int cursor) {
-    return cursor * AudioConstants.FrameSizeInBytes < PcmData.Length;
+    return (cursor + 1) * AudioConstants.FrameSizeInBytes < PcmData.Length;
   }
   public ReadOnlySpan<float> GetFrame(int cursor) {
     var min = cursor * AudioConstants.FrameSizeInBytes;
