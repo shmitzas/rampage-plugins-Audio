@@ -50,6 +50,7 @@ public class AudioMainloop : IDisposable {
       Buffer[i] = new byte[AudioConstants.MainloopBufferSize];
     }
     cancellationTokenSource = new CancellationTokenSource();
+    timer = new PeriodicTimer(TimeSpan.FromMilliseconds(AudioConstants.PacketIntervalMilliseconds));
     audioTask = Task.Run(async () => {
       try {
         await StartAudio(cancellationTokenSource.Token);
@@ -57,7 +58,6 @@ public class AudioMainloop : IDisposable {
         logger.LogError(e, "Error in AudioMainloop");
       }
     });
-    timer = new PeriodicTimer(TimeSpan.FromMilliseconds(AudioConstants.PacketIntervalMilliseconds));
   }
 
   public void Dispose() {
