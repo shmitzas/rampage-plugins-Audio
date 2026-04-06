@@ -135,9 +135,9 @@ public class AudioManager : IDisposable {
     return CurrentFrame.AsSpan();
   }
 
-  public int GetFrameAsOpus(int slot, Span<byte> outBuffer, int outputLength) {
+  public int GetFrameAsOpus(int slot, Span<byte> outBuffer) {
     GetFrame(slot);
-    var encoded = Encoders[slot].Encode(CurrentFrame.AsSpan(), AudioConstants.FrameSize, outBuffer, outputLength);
+    var encoded = Encoders[slot].Encode(CurrentFrame.AsSpan(), AudioConstants.FrameSize, outBuffer, outBuffer.Length);
     return encoded;
   } 
 

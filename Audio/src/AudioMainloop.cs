@@ -35,6 +35,7 @@ public class AudioMainloop : IDisposable {
   private byte[][] Buffer { get; set; } = new byte[AudioConstants.MaxPlayers][];
   private ConcurrentQueue<CSVCMsg_VoiceData> VoiceDataQueue { get; set; } = new();
   private ConcurrentQueue<CSVCMsg_VoiceData> DisposedVoiceDataQueue { get; set; } = new();
+  private bool _disposed;
 
   public bool IsRunning { get; set; }
 
@@ -61,65 +62,88 @@ public class AudioMainloop : IDisposable {
   }
 
   public void Dispose() {
-    cancellationTokenSource.Dispose();
+    if (_disposed) {
+      return;
+    }
+
+    _disposed = true;
+    cancellationTokenSource.Cancel();
     timer.Dispose();
-    audioTask.Dispose();
+
+    try {
+      audioTask.GetAwaiter().GetResult();
+    }
+    catch (OperationCanceledException) {
+    }
+    finally {
+      cancellationTokenSource.Dispose();
+      audioTask.Dispose();
+    }
   }
 
   public async Task StartAudio(CancellationToken cancellationToken)
   {
-    while (await timer.WaitForNextTickAsync())
+    try
     {
-      if (cancellationToken.IsCancellationRequested)
+      while (await timer.WaitForNextTickAsync(cancellationToken))
       {
-        return;
-      }
-      if (!IsRunning) continue;
-      Core.Profiler.StartRecording("AudioMainloop");
-      var allPlayers = Core.PlayerManager.GetAllPlayers();
+        if (cancellationToken.IsCancellationRequested)
+        {
+          return;
+        }
 
-      var offsets = new List<int>[AudioConstants.MaxPlayers]; 
-      for (int j = 0; j < AudioConstants.MaxPacketCount; j++)
-      {
+        if (!IsRunning) continue;
+        Core.Profiler.StartRecording("AudioMainloop");
+        var allPlayers = Core.PlayerManager.GetAllPlayers();
+
+        var offsets = new List<int>[AudioConstants.MaxPlayers]; 
+        for (int j = 0; j < AudioConstants.MaxPacketCount; j++)
+        {
+          foreach (var player in allPlayers)
+          {
+            if (player is not { IsValid: true }) continue;
+            var i = player.PlayerID;
+            if (!audioManager.HasFrame(i)) continue;
+            if (offsets[player.PlayerID] is null) offsets[player.PlayerID] = new List<int>();
+            var lastOffset = offsets[i].Count == 0 ? 0 : offsets[i].Last();
+            var remainingLength = Buffer[i].Length - lastOffset;
+            if (remainingLength <= 0) {
+              throw new InvalidOperationException($"No remaining Opus buffer space for player {i}.");
+            }
+
+            var length = audioManager.GetFrameAsOpus(i, Buffer[i].AsSpan(lastOffset, remainingLength));
+            offsets[i].Add(lastOffset + length);
+          }
+          audioManager.NextFrame();
+        } 
+
+        sectionNumber++;
+
         foreach (var player in allPlayers)
         {
-          if (player is not { IsValid: true }) continue;
+          if (player is not { IsValid: true} || offsets[player.PlayerID] is null) continue; 
           var i = player.PlayerID;
-          if (!audioManager.HasFrame(i)) continue;
-          if (offsets[player.PlayerID] is null) offsets[player.PlayerID] = new List<int>();
-          var lastOffset = offsets[i].Count == 0 ? 0 : offsets[i].Last();
 
-          var length = audioManager.GetFrameAsOpus(i, Buffer[i].AsSpan(lastOffset), AudioConstants.MainloopBufferSize);
-          offsets[i].Add(lastOffset + length);
+          var msg = Core.NetMessage.Create<CSVCMsg_VoiceData>();
+
+          msg.Client = -1;
+          msg.Audio.SequenceBytes = 0;
+          msg.Audio.SampleRate = AudioConstants.SampleRate;
+          msg.Audio.Format = VoiceDataFormat_t.VOICEDATA_FORMAT_OPUS;
+          msg.Audio.SectionNumber = sectionNumber;
+          msg.Audio.NumPackets = (uint)offsets[i].Count;
+          foreach (var offset in offsets[i]) {
+            msg.Audio.PacketOffsets.Add((uint)offset);
+          }
+          msg.Audio.VoiceData = Buffer[i].AsSpan(0, offsets[i].Last()).ToArray();
+          msg.Recipients.AddRecipient(i);
+          VoiceDataQueue.Enqueue(msg);
         }
-        audioManager.NextFrame();
-      } 
 
-      sectionNumber++;
-
-      foreach (var player in allPlayers)
-      {
-        if (player is not { IsValid: true} || offsets[player.PlayerID] is null) continue; 
-        var i = player.PlayerID;
-
-        var msg = Core.NetMessage.Create<CSVCMsg_VoiceData>();
-
-        msg.Client = -1;
-        msg.Audio.SequenceBytes = 0;
-        msg.Audio.SampleRate = AudioConstants.SampleRate;
-        msg.Audio.Format = VoiceDataFormat_t.VOICEDATA_FORMAT_OPUS;
-        msg.Audio.SectionNumber = sectionNumber;
-        msg.Audio.NumPackets = (uint)offsets[i].Count;
-        foreach (var offset in offsets[i]) {
-          msg.Audio.PacketOffsets.Add((uint)offset);
-        }
-        msg.Audio.VoiceData = Buffer[i].AsSpan(0, offsets[i].Last()).ToArray();
-        msg.Recipients.AddRecipient(i);
-        VoiceDataQueue.Enqueue(msg);
+        Core.Profiler.StopRecording("AudioMainloop");
       }
-
-      Core.Profiler.StopRecording("AudioMainloop");
-      // Console.WriteLine($"Time taken: {sw.ElapsedMilliseconds}ms");
+    }
+    catch (OperationCanceledException) {
     }
   }
 

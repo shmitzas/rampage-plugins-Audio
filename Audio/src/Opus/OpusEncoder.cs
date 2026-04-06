@@ -24,6 +24,7 @@ namespace Audio.Opus;
 public class OpusEncoder : IDisposable {
 
   private OpusSafeHandle Handle { get; set; }
+  private object SyncRoot { get; } = new();
 
   private bool _disposed = false;
 
@@ -40,7 +41,6 @@ public class OpusEncoder : IDisposable {
   /// <param name="channels"> The number of channels of the audio to encode. </param>
   /// <param name="application"> The application of the audio to encode. </param>
   public OpusEncoder(int sampleRate, int channels, OpusApplication application) {
-    ThrowIfDisposed();
     Handle = Engine2Opus.Create(sampleRate, channels, application);
   }
 
@@ -53,8 +53,10 @@ public class OpusEncoder : IDisposable {
   /// <param name="outputLength"> The length of the output audio data. </param>
   /// <returns> The number of bytes encoded. </returns>
   public int Encode(ReadOnlySpan<float> input, int inputLength, Span<byte> output, int outputLength) {
-    ThrowIfDisposed();
-    return Engine2Opus.EncodeFloat(Handle, input, inputLength, output, outputLength);
+    lock (SyncRoot) {
+      ThrowIfDisposed();
+      return Engine2Opus.EncodeFloat(Handle, input, inputLength, output, outputLength);
+    }
   }
 
 
@@ -63,24 +65,30 @@ public class OpusEncoder : IDisposable {
   /// </summary>
   /// <param name="complexity"> The complexity of the encoder. </param>
   public void SetComplexity(int complexity) {
-    ThrowIfDisposed();
     if (complexity < 0 || complexity > 10) {
       throw new ArgumentException("OpusComplexity must be between 0 and 10.");
     }
-    Engine2Opus.SetEncoderCTL(Handle, (int)OpusCtlRequest.OPUS_SET_COMPLEXITY_REQUEST, complexity);
+    lock (SyncRoot) {
+      ThrowIfDisposed();
+      Engine2Opus.SetEncoderCTL(Handle, (int)OpusCtlRequest.OPUS_SET_COMPLEXITY_REQUEST, complexity);
+    }
   }
 
   /// <summary>
   /// Resets the encoder.
   /// </summary>
   public void Reset() {
-    ThrowIfDisposed();
-    Engine2Opus.SetEncoderCTL(Handle, (int)OpusCtlRequest.OPUS_RESET_STATE, 0);
+    lock (SyncRoot) {
+      ThrowIfDisposed();
+      Engine2Opus.SetEncoderCTL(Handle, (int)OpusCtlRequest.OPUS_RESET_STATE, 0);
+    }
   }
 
   public void Dispose() {
-    if (_disposed) return;
-    Engine2Opus.Destroy(Handle);
-    _disposed = true;
+    lock (SyncRoot) {
+      if (_disposed) return;
+      Handle.Dispose();
+      _disposed = true;
+    }
   }
 }

@@ -24,10 +24,13 @@ public class OpusSafeHandle : SafeHandle {
   public OpusSafeHandle() : base(IntPtr.Zero, true) {
   }
 
-  public override bool IsInvalid => false;
+  public override bool IsInvalid => handle == IntPtr.Zero;
 
   protected override bool ReleaseHandle() {
-    Engine2Opus.Destroy(this);
+    if (!IsInvalid) {
+      Engine2Opus.Destroy(handle);
+      handle = IntPtr.Zero;
+    }
     return true;
   }
 }

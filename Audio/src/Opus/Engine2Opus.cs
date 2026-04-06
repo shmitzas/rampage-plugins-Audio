@@ -44,34 +44,81 @@ public static class Engine2Opus {
     return handle;
   }
 
+  internal static void Destroy(nint encoder) {
+    if (encoder != IntPtr.Zero) {
+      opus_encoder_destroy(encoder);
+    }
+  }
+
   public static void SetEncoderCTL(OpusSafeHandle encoder, int request, nint data) {
-    var result = opus_encoder_ctl(encoder.DangerousGetHandle(), request, data);
-    OpusException.ThrowIfError("opus_encoder_ctl", result);
+    bool releaseHandle = false;
+    try {
+      encoder.DangerousAddRef(ref releaseHandle);
+      var result = opus_encoder_ctl(encoder.DangerousGetHandle(), request, data);
+      OpusException.ThrowIfError("opus_encoder_ctl", result);
+    }
+    finally {
+      if (releaseHandle) {
+        encoder.DangerousRelease();
+      }
+    }
   }
 
   public static void Destroy(OpusSafeHandle encoder) {
-    opus_encoder_destroy(encoder.DangerousGetHandle());
+    encoder.Dispose();
   }
 
   public static int EncodeFloat(OpusSafeHandle encoder, ReadOnlySpan<float> input, int inputLength, Span<byte> output, int outputLength) {
+    if ((uint)inputLength > (uint)input.Length) {
+      throw new ArgumentOutOfRangeException(nameof(inputLength));
+    }
+    if ((uint)outputLength > (uint)output.Length) {
+      throw new ArgumentOutOfRangeException(nameof(outputLength));
+    }
+
+    bool releaseHandle = false;
     unsafe {
-      fixed (float* inputPtr = input) {
-        fixed (byte* outputPtr = output) {
+      try {
+        encoder.DangerousAddRef(ref releaseHandle);
+        fixed (float* inputPtr = input) {
+          fixed (byte* outputPtr = output) {
           var result = opus_encode_float(encoder.DangerousGetHandle(), (nint)inputPtr, inputLength, (nint)outputPtr, outputLength);
           OpusException.ThrowIfError("opus_encode_float", result);
           return result;
+          }
+        }
+      }
+      finally {
+        if (releaseHandle) {
+          encoder.DangerousRelease();
         }
       }
     }
   }
 
   public static int Encode(OpusSafeHandle encoder, ReadOnlySpan<short> input, int inputLength, Span<byte> output, int outputLength) {
+    if ((uint)inputLength > (uint)input.Length) {
+      throw new ArgumentOutOfRangeException(nameof(inputLength));
+    }
+    if ((uint)outputLength > (uint)output.Length) {
+      throw new ArgumentOutOfRangeException(nameof(outputLength));
+    }
+
+    bool releaseHandle = false;
     unsafe {
-      fixed (short* inputPtr = input) {
-        fixed (byte* outputPtr = output) {
+      try {
+        encoder.DangerousAddRef(ref releaseHandle);
+        fixed (short* inputPtr = input) {
+          fixed (byte* outputPtr = output) {
           var result = opus_encode(encoder.DangerousGetHandle(), (nint)inputPtr, inputLength, (nint)outputPtr, outputLength);
           OpusException.ThrowIfError("opus_encode", result);
           return result;
+          }
+        }
+      }
+      finally {
+        if (releaseHandle) {
+          encoder.DangerousRelease();
         }
       }
     }
